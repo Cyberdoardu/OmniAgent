@@ -333,26 +333,55 @@ async function processAgentStep(initialInstruction = null) {
 
         // 1. Get Visual Context (Robust Retry)
         let scanResponse = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
-            try {
-                scanResponse = await chrome.tabs.sendMessage(tab.id, { type: "GET_VISUAL_CONTEXT" });
-                if (scanResponse) break;
-            } catch (e) {
-                if (attempt === 0) {
-                    console.log("Injecting script...");
-                    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-                    await new Promise(r => setTimeout(r, 800));
-                } else {
-                    console.error("Scan failed after retry", e);
+
+        // Check for restricted protocols where we CANNOT inject scripts
+        const currentUrl = tab.url || "";
+        const isRestricted = !currentUrl ||
+            currentUrl.startsWith('chrome://') ||
+            currentUrl.startsWith('chrome-extension://') ||
+            currentUrl.startsWith('edge://') ||
+            currentUrl.startsWith('about:');
+
+        if (isRestricted) {
+            console.log("On restricted page (or undefined URL), skipping scan.");
+            scanResponse = {
+                context: "SYSTEM: Current page is a browser system page (New Tab/Settings). visual elements are unavailable. If you obtain a search query, uses 'NAVIGATE' or 'OPEN_TAB' to go to a search engine like google.com."
+            };
+        } else {
+            // Normal Page Loop
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    scanResponse = await chrome.tabs.sendMessage(tab.id, { type: "GET_VISUAL_CONTEXT" });
+                    if (scanResponse) break;
+                } catch (e) {
+                    if (attempt === 0) {
+                        console.log("Injecting script...");
+                        try {
+                            await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+                            await new Promise(r => setTimeout(r, 800));
+                        } catch (injectError) {
+                            console.warn("Injection failed (likely restricted domain):", injectError);
+                            break; // Stop retrying if injection fails (e.g. Chrome Web Store)
+                        }
+                    } else {
+                        console.error("Scan failed after retry", e);
+                    }
                 }
             }
         }
 
         if (!scanResponse || !scanResponse.context) {
-            // If navigating, we might fail. Just wait and retry loop?
-            console.log("Context empty, maybe navigating...");
-            if (!stopRequested) setTimeout(processAgentStep, 2000);
-            return;
+            // Only retry if it wasn't a restricted page that we purposely set a context for
+            // If restricted and we set context, we pass through.
+            if (!isRestricted) {
+                // If navigating, we might fail. Just wait and retry loop?
+                console.log("Context empty, maybe navigating...");
+                if (!stopRequested) setTimeout(processAgentStep, 2000);
+                return;
+            } else if (!scanResponse) {
+                // Fallback if somehow restricted logic failed
+                scanResponse = { context: "SYSTEM: Page inaccessible." };
+            }
         }
 
         // 2. Send to LLM
@@ -401,6 +430,10 @@ async function processAgentStep(initialInstruction = null) {
                 } else if (action.action === 'OPEN_TAB') {
                     addMessage('bot', `Opening new tab: ${action.value}`);
                     await chrome.tabs.create({ url: action.value, active: false });
+                    setTimeout(processAgentStep, 3000);
+                } else if (action.action === 'NAVIGATE') {
+                    addMessage('bot', `Navigating to ${action.value}...`);
+                    await chrome.tabs.update(tab.id, { url: action.value });
                     setTimeout(processAgentStep, 3000);
                 } else if (action.action === 'SAVE_MEMORY') {
                     // internal

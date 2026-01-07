@@ -86,23 +86,24 @@ ${visualContext}
 GUIDELINES:
 1. **Goal Achievement**: Break down the user's goal into logical steps (Research, Action, Verification).
 2. **Efficiency**: Before clicking into details, check if the necessary information is visible on the current page (e.g., list views). If so, use "SAVE_MEMORY".
-3. **Internal Memory**: usage of "SAVE_MEMORY" is automatic and internal. Do NOT announce it as a step to the user, just do it.
-4. **Workflow**: Scan/Research -> Save Relevant Data -> Analyze/Decide -> Execute Action.
-5. **Risk Assessment**:
+3. **Batch Saving**: If multiple relevant items are visible (e.g. in a search list), save them ALL in a ONE single "SAVE_MEMORY" action as an array. Do NOT loop one by one.
+4. **Internal Memory**: usage of "SAVE_MEMORY" is automatic and internal. Do NOT announce it as a step to the user, just do it.
+5. **Workflow**: Scan/Research -> Save Relevant Data -> Analyze/Decide -> Execute Action.
+6. **Risk Assessment**:
    - **HIGH**: Buying (Checkout), Deleting data, Posting content, Auth/Login, Configuring Settings.
    - **MEDIUM**: Navigating to new domains, Clicking ads/unknown links.
    - **LOW**: Searching, Scrolling, Reading, Extracting, Tab Management.
    - If the user asks for "Intermediate Mode", only HIGH risks block for approval.
-6. **Chat Titles**: If this is the START of a conversation, generate a short \`new_title\` (3-5 words) summarizing the goal.
+7. **Chat Titles**: If this is the START of a conversation, generate a short \`new_title\` (3-5 words) summarizing the goal.
 
 RESPONSE FORMAT:
 Strictly output a JSON object with this schema (no markdown, no code blocks):
 {
-  "thought": "Internal reasoning (e.g. 'I see the data I need, saving it now')",
+  "thought": "Internal reasoning (e.g. 'I see 5 prices in the list, will save them all in one go')",
   "message": "Public message to user (e.g. 'Searching for...', or null)",
   "action": "CLICK" | "TYPE" | "SCROLL" | "NAVIGATE" | "OPEN_TAB" | "EXTRACT" | "DONE" | "SAVE_MEMORY",
   "target_id": 12, // (integer) or null
-  "value": "For SAVE_MEMORY: '{\"key\":\"variable_name\", \"value\":\"...\"}'. For others: text/url",
+  "value": "For SAVE_MEMORY: '{\"key\":\"variable_name\", \"value\": [item1, item2, ...]}'. For others: text/url",
   "risk_score": "LOW" | "MEDIUM" | "HIGH",
   "new_title": "Conversation Title (or null if not new)"
 }
@@ -145,9 +146,16 @@ Strictly output a JSON object with this schema (no markdown, no code blocks):
         const value = data.value || data;
 
         if (!agentMemory[key]) agentMemory[key] = [];
-        agentMemory[key].push(value);
 
-        parsedAction.message = `Saved to memory: ${JSON.stringify(value)}`;
+        // Handle Batch Saving (Array)
+        if (Array.isArray(value)) {
+          value.forEach(item => agentMemory[key].push(item));
+          parsedAction.message = `Batch saved ${value.length} items to memory.`;
+        } else {
+          agentMemory[key].push(value);
+          parsedAction.message = `Saved to memory: ${JSON.stringify(value).substring(0, 50)}...`;
+        }
+
       } catch (e) {
         console.error("Memory parsing error", e);
       }
