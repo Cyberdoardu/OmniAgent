@@ -1,1 +1,30 @@
-/README.md
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Extension Builds
+dist/
+build/
+*.zip
+*.crx
+key.pem
+
+# Local Agent Data (if any)
+.gemini/
