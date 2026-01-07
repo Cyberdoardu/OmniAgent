@@ -150,10 +150,10 @@ Strictly output a JSON object with this schema (no markdown, no code blocks):
         // Handle Batch Saving (Array)
         if (Array.isArray(value)) {
           value.forEach(item => agentMemory[key].push(item));
-          parsedAction.message = `Batch saved ${value.length} items to memory.`;
+          parsedAction.message = `Batch saved ${value.length} items to memory:\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
         } else {
           agentMemory[key].push(value);
-          parsedAction.message = `Saved to memory: ${JSON.stringify(value).substring(0, 50)}...`;
+          parsedAction.message = `Saved to memory:\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
         }
 
       } catch (e) {
