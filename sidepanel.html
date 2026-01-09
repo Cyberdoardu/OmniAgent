@@ -62,46 +62,118 @@
     <div id="settings-modal" class="modal hidden">
         <div class="modal-content">
             <span id="close-settings" class="close">&times;</span>
-            <h2>Settings</h2>
-
-            <div class="setting-group">
-                <label for="provider-select">LLM Provider:</label>
-                <select id="provider-select">
-                    <option value="gemini">Google Gemini</option>
-                    <option value="openai">OpenAI (GPT-4)</option>
-                    <option value="anthropic">Anthropic (Claude)</option>
-                    <option value="ollama">Ollama (Local)</option>
-                </select>
+            <div class="tabs-header">
+                <button class="tab-btn active" data-tab="tab-main">Main</button>
+                <button class="tab-btn" data-tab="tab-custom">Instructions</button>
+                <button class="tab-btn" data-tab="tab-notify">Notifications</button>
+                <button class="tab-btn" data-tab="tab-mcp">MCP</button>
+                <button class="tab-btn" data-tab="tab-secrets">Secrets</button>
             </div>
 
-            <div class="setting-group" id="api-key-section">
-                <label for="apiKey">API Key:</label>
-                <input type="password" id="apiKey" placeholder="Enter API Key">
-            </div>
+            <div class="tab-content">
+                <!-- Main Tab -->
+                <!-- Main Tab -->
+                <div id="tab-main" class="tab-pane active">
+                    <div class="setting-group">
+                        <label for="provider-select">LLM Provider:</label>
+                        <select id="provider-select">
+                            <option value="gemini">Google Gemini</option>
+                            <option value="openai">OpenAI (GPT-4/Turbo)</option>
+                            <option value="anthropic">Anthropic (Claude)</option>
+                            <option value="ollama">Ollama (Local)</option>
+                        </select>
+                    </div>
 
-            <div id="ollama-section" class="hidden">
-                <div class="setting-group">
-                    <label for="ollama-endpoint">Endpoint:</label>
-                    <input type="text" id="ollama-endpoint" value="http://localhost:11434/api/generate">
-                </div>
-                <div class="setting-group">
-                    <label for="ollama-model">Model Name:</label>
-                    <input type="text" id="ollama-model" value="llama3">
-                </div>
-            </div>
+                    <!-- Custom Model Name (Generic for all providers) -->
+                    <div class="setting-group">
+                        <label for="model-name">Model Name (ID):</label>
+                        <input type="text" id="model-name" placeholder="e.g. gemini-1.5-flash, gpt-4o, claude-3-opus">
+                        <div style="font-size:0.8em; color:#888; margin-top:4px;">
+                            Gemini: <code>gemini-2.0-flash-exp</code><br>
+                            OpenAI: <code>gpt-4o</code><br>
+                            Claude: <code>claude-3-opus-20240229</code>
+                        </div>
+                    </div>
 
-            <div class="setting-group">
-                <label>Autonomy Mode:</label>
-                <div class="radio-group">
-                    <label><input type="radio" name="autonomy" value="manual" checked> Manual (Ask Everything)</label>
-                    <label><input type="radio" name="autonomy" value="semi"> Intermediate (High Risk Only)</label>
-                    <label><input type="radio" name="autonomy" value="auto"> Fully Autonomous</label>
+                    <div class="setting-group" id="api-key-section">
+                        <label for="apiKey">API Key / Endpoint:</label>
+                        <input type="password" id="apiKey" placeholder="Enter API Key">
+                    </div>
+
+                    <div id="ollama-section" class="hidden">
+                        <!-- Ollama specific config if needed, but we can reuse generic fields now? 
+                              Let's keep endpoint separate for Ollama or reuse 'apiKey' field as endpoint?
+                              User request implies "adjusting to work based on provider".
+                              Let's keep specific Ollama Endpoint field for clarity. -->
+                        <div class="setting-group">
+                            <label for="ollama-endpoint">Ollama Endpoint:</label>
+                            <input type="text" id="ollama-endpoint" value="http://localhost:11434/api/generate">
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Autonomy Mode:</label>
+                        <div class="radio-group">
+                            <label><input type="radio" name="autonomy" value="manual" checked> Manual (Ask
+                                Everything)</label>
+                            <label><input type="radio" name="autonomy" value="semi"> Intermediate (High Risk
+                                Only)</label>
+                            <label><input type="radio" name="autonomy" value="auto"> Fully Autonomous</label>
+                        </div>
+                        <p class="help-text" style="font-size: 0.8em; color: #aaa; margin-top:5px; line-height: 1.4;">
+                            <b>Manual:</b> The agent asks for confirmation before every action.<br>
+                            <b>Intermediate:</b> The agent only asks before high-risk actions (purchases, deleting
+                            data).<br>
+                            <b>Auto:</b> The agent runs autonomously until the task is complete. Use with caution.
+                        </p>
+                    </div>
                 </div>
-                <p class="help-text" style="font-size: 0.8em; color: #aaa; margin-top:5px;">
-                    <b>Manual:</b> Approve every action.<br>
-                    <b>Intermediate:</b> Approve purchases, sensitive data, logins.<br>
-                    <b>Auto:</b> The agent runs until done.
-                </p>
+
+                <!-- Custom Instructions Tab -->
+                <div id="tab-custom" class="tab-pane">
+                    <div class="setting-group">
+                        <label for="custom-instructions">Global System Instructions:</label>
+                        <textarea id="custom-instructions" rows="8"
+                            placeholder="E.g., 'Always answer in Portuguese', 'Be concise'."
+                            style="width:100%; background:#333; color:white; border:1px solid #555; padding:8px; border-radius:4px;"></textarea>
+                    </div>
+                </div>
+
+                <!-- Notifications Tab -->
+                <div id="tab-notify" class="tab-pane">
+                    <div class="setting-group">
+                        <label class="inline-label"><input type="checkbox" id="notify-sound"> Play Sound on
+                            Completion</label>
+                        <label class="inline-label"><input type="checkbox" id="notify-popup"> Show Popup on
+                            Completion</label>
+                    </div>
+                </div>
+
+                <!-- MCP Tab -->
+                <div id="tab-mcp" class="tab-pane">
+                    <div class="setting-group">
+                        <p style="color:#aaa; font-size:0.9em;">Model Context Protocol (MCP) servers allow the agent to
+                            access local tools and data.</p>
+                        <button class="secondary-btn" id="add-mcp-btn">+ Add MCP Server</button>
+                        <div id="mcp-list" style="margin-top:10px;">
+                            <!-- List of MCPs -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Secrets Tab -->
+                <div id="tab-secrets" class="tab-pane">
+                    <p style="color:#aaa; font-size:0.9em;">Securely store keys. Values are hidden after saving.</p>
+                    <div class="setting-group">
+                        <input type="text" id="secret-key" placeholder="Key (e.g. AWS_KEY)">
+                        <input type="password" id="secret-value" placeholder="Value">
+                        <button id="add-secret-btn" class="secondary-btn" style="width:100%; margin-top:5px;">Add
+                            Secret</button>
+                    </div>
+                    <div id="secrets-list" style="margin-top:15px; border-top:1px solid #444; padding-top:10px;">
+                        <!-- Secrets items -->
+                    </div>
+                </div>
             </div>
 
             <button id="save-settings">Save Settings</button>
@@ -109,6 +181,9 @@
     </div>
 
     <script src="markdown.js"></script>
+    <!-- Token Footer -->
+    <div id="token-footer">Total Tokens: 0</div>
+
     <script src="sidepanel.js"></script>
 </body>
 

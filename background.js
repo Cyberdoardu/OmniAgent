@@ -7,8 +7,13 @@ let apiKeys = {
   openai: '',
   anthropic: ''
 };
+let models = {
+  gemini: 'gemini-3-flash-preview',
+  openai: 'gpt-4o',
+  anthropic: 'claude-3-opus-20240229',
+  ollama: 'llama3'
+};
 let ollamaEndpoint = 'http://localhost:11434/api/generate';
-let ollamaModel = 'llama3';
 
 // Persistent Memory for specific tasks
 let agentMemory = {};
@@ -20,11 +25,11 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
 }
 
 // Load settings on startup
-chrome.storage.sync.get(['provider', 'apiKeys', 'ollamaEndpoint', 'ollamaModel'], (result) => {
+chrome.storage.sync.get(['provider', 'apiKeys', 'models', 'ollamaEndpoint'], (result) => {
   if (result.provider) currentProvider = result.provider;
   if (result.apiKeys) apiKeys = result.apiKeys;
+  if (result.models) models = result.models;
   if (result.ollamaEndpoint) ollamaEndpoint = result.ollamaEndpoint;
-  if (result.ollamaModel) ollamaModel = result.ollamaModel;
 });
 
 // Listen for updates in settings
@@ -32,8 +37,8 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'sync') {
     if (changes.provider) currentProvider = changes.provider.newValue;
     if (changes.apiKeys) apiKeys = changes.apiKeys.newValue;
+    if (changes.models) models = changes.models.newValue;
     if (changes.ollamaEndpoint) ollamaEndpoint = changes.ollamaEndpoint.newValue;
-    if (changes.ollamaModel) ollamaModel = changes.ollamaModel.newValue;
   }
 });
 
@@ -66,7 +71,6 @@ async function handleUserCommand(payload, sendResponse) {
   const memoryContext = JSON.stringify(agentMemory, null, 2);
 
   // Construct the system prompt with visual context
-  // This is the "Visual Grounding" part fed into the LLM
   const systemPrompt = `
 You are OmniAgent, a browser automation assistant.
 You will receive a list of interactive elements visible on the screen, each with a numeric ID (e.g., [42]).
@@ -89,19 +93,25 @@ GUIDELINES:
 3. **Batch Saving**: If multiple relevant items are visible (e.g. in a search list), save them ALL in a ONE single "SAVE_MEMORY" action as an array. Do NOT loop one by one.
 4. **Internal Memory**: usage of "SAVE_MEMORY" is automatic and internal. Do NOT announce it as a step to the user, just do it.
 5. **Workflow**: Scan/Research -> Save Relevant Data -> Analyze/Decide -> Execute Action.
-6. **Risk Assessment**:
+6. **Patience & Verification**:
+   - **WAIT**: If an action (like clicking 'Send' or submitting a form) takes time to process, use the "WAIT" action. Do NOT immediately try again.
+   - **Check**: improved: After "TYPE", use "WAIT" or check the next scan to ensure text appeared. If it didn't, try a different selector or move on.
+   - **Submitting**: The "TYPE" action AUTOMATICALLY presses ENTER. Do NOT follow "TYPE" with "CLICK" (Send) immediately. Wait to see if Enter worked first.
+   - **Prevent Loops**: If you just scrolled and the visual context didn't change significantly, STOP scrolling. If you see the start of the answer, assume you can read it.
+   - **Retries**: Don't loop infinitely. If an action fails 3 times, stop and ask the user for help.
+7. **Risk Assessment**:
    - **HIGH**: Buying (Checkout), Deleting data, Posting content, Auth/Login, Configuring Settings.
    - **MEDIUM**: Navigating to new domains, Clicking ads/unknown links.
    - **LOW**: Searching, Scrolling, Reading, Extracting, Tab Management.
    - If the user asks for "Intermediate Mode", only HIGH risks block for approval.
-7. **Chat Titles**: If this is the START of a conversation, generate a short \`new_title\` (3-5 words) summarizing the goal.
+8. **Chat Titles**: If this is the START of a conversation, generate a short \`new_title\` (3-5 words) summarizing the goal.
 
 RESPONSE FORMAT:
 Strictly output a JSON object with this schema (no markdown, no code blocks):
 {
   "thought": "Internal reasoning (e.g. 'I see 5 prices in the list, will save them all in one go')",
   "message": "Public message to user (e.g. 'Searching for...', or null)",
-  "action": "CLICK" | "TYPE" | "SCROLL" | "NAVIGATE" | "OPEN_TAB" | "EXTRACT" | "DONE" | "SAVE_MEMORY",
+  "action": "CLICK" | "TYPE" | "SCROLL" | "NAVIGATE" | "OPEN_TAB" | "EXTRACT" | "DONE" | "SAVE_MEMORY" | "WAIT",
   "target_id": 12, // (integer) or null
   "value": "For SAVE_MEMORY: '{\"key\":\"variable_name\", \"value\": [item1, item2, ...]}'. For others: text/url",
   "risk_score": "LOW" | "MEDIUM" | "HIGH",
@@ -129,7 +139,7 @@ Strictly output a JSON object with this schema (no markdown, no code blocks):
         throw new Error(`Unknown provider: ${currentProvider}`);
     }
 
-    // Try parsing the response if the LLM returned a string with code blocks
+    // Try parsing the response
     let cleanJson = responseJson;
     if (typeof responseJson === 'string') {
       cleanJson = cleanJson.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -141,13 +151,11 @@ Strictly output a JSON object with this schema (no markdown, no code blocks):
     if (parsedAction.action === 'SAVE_MEMORY') {
       try {
         const data = JSON.parse(parsedAction.value);
-        // Support simple key-value or complex object
         const key = data.key || 'general';
         const value = data.value || data;
 
         if (!agentMemory[key]) agentMemory[key] = [];
 
-        // Handle Batch Saving (Array)
         if (Array.isArray(value)) {
           value.forEach(item => agentMemory[key].push(item));
           parsedAction.message = `Batch saved ${value.length} items to memory:\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
@@ -173,56 +181,90 @@ Strictly output a JSON object with this schema (no markdown, no code blocks):
 
 async function callGemini(prompt) {
   if (!apiKeys.gemini) throw new Error("Gemini API Key is missing.");
+  const model = models.gemini || 'gemini-3-flash-preview';
 
-  // Using the requested preview model
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKeys.gemini}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKeys.gemini}`;
 
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { response_mime_type: "application/json" } // Force JSON mode
+      generationConfig: { response_mime_type: "application/json" }
     })
   });
 
   if (!response.ok) {
-    let errorBody = "";
-    try {
-      errorBody = await response.text();
-    } catch (e) {
-      errorBody = "Could not read error body";
-    }
-    throw new Error(`Gemini API Error (${response.status}): ${errorBody}`);
+    const txt = await response.text();
+    throw new Error(`Gemini Error: ${txt}`);
   }
   const data = await response.json();
   return data.candidates[0].content.parts[0].text;
 }
 
-// Stub for OpenAI
 async function callOpenAI(prompt) {
   if (!apiKeys.openai) throw new Error("OpenAI API Key is missing.");
-  // Implementation would go here (v1/chat/completions)
-  return JSON.stringify({ thought: "OpenAI not implemented yet", action: "DONE" }); // Placeholder
+  const model = models.openai || 'gpt-4o';
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKeys.openai}`
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: [{ role: 'system', content: prompt }], // OpenAI works best if everything is system prompt or user? 
+      // For agents, User Prompt usually works, but System is better for guidelines.
+      // Let's use single User message effectively containing the prompt.
+      // actually, system role is best for instructions.
+      // But prompt has specific Context. Let's send as user? 
+      // Let's stick to System for consistency.
+      response_format: { type: "json_object" }
+    })
+  });
+
+  if (!response.ok) throw new Error(`OpenAI Error: ${await response.text()}`);
+  const data = await response.json();
+  return data.choices[0].message.content;
 }
 
-// Stub for Anthropic
 async function callAnthropic(prompt) {
   if (!apiKeys.anthropic) throw new Error("Anthropic API Key is missing.");
-  // Implementation would go here (v1/messages)
-  return JSON.stringify({ thought: "Claude not implemented yet", action: "DONE" }); // Placeholder
+  const model = models.anthropic || 'claude-3-opus-20240229';
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKeys.anthropic,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: model,
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }] // Claude prefers User role
+    })
+  });
+
+  if (!response.ok) throw new Error(`Anthropic Error: ${await response.text()}`);
+  const data = await response.json();
+  return data.content[0].text;
 }
 
-// Local Ollama
 async function callOllama(prompt) {
+  const model = models.ollama || 'llama3'; // User generic model input overrides specific ollamaModel if we align them
+  // Warning: We had 'ollamaModel' separate variable before. Now we use models.ollama.
+  // We synced this in sidepanel.js.
+
   const response = await fetch(ollamaEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: ollamaModel,
+      model: model,
       prompt: prompt,
       stream: false,
-      format: "json" // Ensure Ollama outputs JSON
+      format: "json"
     })
   });
 

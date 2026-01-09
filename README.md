@@ -1,19 +1,23 @@
-# 🤖 OmniAgent - Visual Browser AI
 
-**OmniAgent** is an experimental open-source Chrome Extension that turns your browser into an autonomous agent. By combining Visual Grounding (analyzing the page structure) with Large Language Models (LLMs), it can understand web pages, click elements, type text, and navigate to help you complete tasks automatically.
+# OmniAgent - Your Autonomous AI Browser Mate
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Status](https://img.shields.io/badge/status-experimental-orange.svg)
+**OmniAgent** turns your browser into an autonomous agent capable of reasoning, planning, and executing complex tasks across the web. Built with privacy and power in mind, it integrates with state-of-the-art LLMs to automate your workflow.
 
-## 🚀 Key Features
 
-*   **Visual Grounding**: The agent "sees" the page by analyzing interactive elements (buttons, inputs, prices) and their coordinates.
-*   **Multi-Provider Support**: Works with **Google Gemini**, **OpenAI (GPT-4)**, **Anthropic (Claude)**, and local models via **Ollama**.
-*   **Autonomy Modes**:
-    *   **Manual**: Review and approve every single action.
-    *   **Intermediate**: Only high-risk actions (purchases, logins) require approval.
-    *   **Autonomous**: The agent runs freely (use with caution).
-*   **Persistent Memory**: Remembers information across pages to perform comparisons or multi-step workflows.
-*   **Chat Interface**: Interact with the agent naturally via a side panel chat.
+## 🚀 Features
+
+*   **Multi-Model Intelligence**: Seamlessly switch between **Google Gemini** (default), **OpenAI GPT-4**, **Anthropic Claude**, or local **Ollama** models.
+*   **Autonomous Browsing**: Can click, type, scroll, and navigate to achieve your goals.
+*   **Visual Grounding**: Sees what you see. Uses DOM snapshots to understand page context.
+*   **Secure Secrets Management**: Store passwords and other values. The agent uses them without "seeing" the raw data.
+*   **Human-in-the-Loop**:
+    *   **Manual**: Approve every action.
+    *   **Semi-Auto**: Runs safe actions automatically; asks for confirmation for high-risk ones (forms, payments).
+    *   **Fully Autonomous**: Let it fly.
+*   **Advanced Config**:
+    *   **Custom Instructions**: Define your agent's persona.
+    *   **Notifications**: Get sound/popup alerts when tasks are done.
+    *   **MCP Support**: (Experimental/TO-DO) Connect to Model Context Protocol servers.
 
 ## ⚠️ Disclaimer (Read Carefully)
 
@@ -23,32 +27,51 @@
 *   **Supervision Required**: AI models can hallucinate or misunderstand UI elements. Always monitor the agent's actions, especially in "Autonomous" or "Intermediate" modes.
 *   **Safety**: Never use this tool on critical banking sessions or to handle highly sensitive unencrypted data without supervision.
 
-## 📥 Installation
+## �️ Installation
 
-Since this is an experimental extension, you need to load it in Developer Mode:
-
-1.  **Clone or Download** this repository.
+1.  **Clone the Repo**:
     ```bash
-    git clone https://github.com/Cyberdoardu/OmniAgent
+    git clone https://github.com/Cyberdoardu/OmniAgent.git
+    cd OmniAgent
     ```
-2.  Open Chrome and navigate to `chrome://extensions`.
-3.  Enable **"Developer mode"** (toggle in the top right).
-4.  Click **"Load unpacked"**.
-5.  Select the `omni-agent-extension` folder you just downloaded.
-6.  The OmniAgent icon should appear in your toolbar.
+2.  **Load in Chrome**:
+    *   Go to `chrome://extensions/`.
+    *   Enable **Developer mode** (top right).
+    *   Click **Load unpacked**.
+    *   Select the `OmniAgent` folder.
 
 ## ⚙️ Configuration
 
-1.  **Open the Side Panel**:
-    *   Click the OmniAgent icon or use the browser's side panel menu to open the extension.
-2.  **Access Settings**:
-    *   Click the **gear icon (⚙️)** in the extension header.
-3.  **Choose Your Provider**:
-    *   **Google Gemini (Recommended for MVP)**: Select "Google Gemini" and paste your API Key.
-    *   **Ollama (Local)**: Select "Ollama". Ensure Ollama is running (`ollama serve`). default endpoint is `http://localhost:11434/api/generate`.
-4.  **Autonomy Settings**:
-    *   **Fully Autonomous Mode**: Check this box if you want the agent to execute actions immediately.
-    *   **Human-in-the-Loop (Unchecked)**: The agent will propose an action (e.g., "CLICK [12]"), and you must click "Approve" or "Reject".
+1.  **Open the Side Panel**: Click the OmniAgent icon in the toolbar.
+2.  **Go to Settings** (Gear Icon):
+    *   **Main**: Select your LLM Provider and enter your API Key.
+        *   Keys are stored in your browser's secure sync storage.
+        *   Only you and the LLM provider see them.
+    *   **Instructions**: Give the agent a role (e.g., "You act as a Senior React Developer").
+    *   **Notifications**: Enable sound effects for task completion.
+    *   **Secrets**: Add keys like `MY_PASSWORD`. Refer to them in chat as "Use my secret MY_PASSWORD".
+
+## 🛡️ Security & Privacy
+
+*   **No Middlemen**: Requests go directly from your browser to the LLM Provider APIs.
+*   **Masked Secrets**: Stored secrets are injected *only* at the moment of execution. The LLM sees a placeholder (`{{SECRET}}`), not the value.
+*   **Open Source**: Verify the code yourself.
+
+## 🧩 Development
+
+This project uses standard web technologies (HTML/CSS/JS) and the Chrome Extension Manifest V3.
+
+*   `background.js`: Central logic, API handlers, and LLM communication.
+*   `content.js`: Eyes and hands. Scans the DOM and executes actions on pages.
+*   `sidepanel.js`: UI logic, state management, and user interaction.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please open an issue or PR to suggest improvements.
+
+## 📄 License
+
+MIT License.
 
 ## 🎮 How to Use
 

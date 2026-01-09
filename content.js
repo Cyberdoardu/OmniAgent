@@ -54,8 +54,14 @@ if (!window.OMNI_AGENT_INITIALIZED) {
             "h1, h2, h3, h4",
             "p",
             "span",
+            "li",
+            "blockquote",
+            "pre",
+            "code",
             "div[class*='price']",
-            "div[class*='valor']"
+            "div[class*='valor']",
+            "[contenteditable='true']",
+            "[contenteditable]"
         ].join(",");
 
         const allElements = document.body.querySelectorAll(selectors);
@@ -66,8 +72,8 @@ if (!window.OMNI_AGENT_INITIALIZED) {
             if (!isVisible(el)) return;
 
             // Filter out generic text containers that are too large or empty
-            if ((el.tagName === 'P' || el.tagName === 'DIV' || el.tagName === 'SPAN') &&
-                (!el.innerText || el.innerText.trim().length < 2 || el.innerText.length > 300)) {
+            if (['P', 'DIV', 'SPAN', 'LI', 'BLOCKQUOTE', 'PRE', 'CODE'].includes(el.tagName) &&
+                (!el.innerText || el.innerText.trim().length < 2 || el.innerText.length > 800)) {
                 return;
             }
 
@@ -146,7 +152,7 @@ if (!window.OMNI_AGENT_INITIALIZED) {
 
     function getElementLabel(el) {
         // Try various sources for a meaningful label
-        const cleanText = (str) => str ? str.trim().replace(/\s+/g, ' ').slice(0, 100) : "";
+        const cleanText = (str) => str ? str.trim().replace(/\s+/g, ' ').slice(0, 800) : "";
 
         if (el.innerText && cleanText(el.innerText).length > 0) return cleanText(el.innerText);
         if (el.getAttribute("aria-label")) return cleanText(el.getAttribute("aria-label"));
@@ -158,6 +164,16 @@ if (!window.OMNI_AGENT_INITIALIZED) {
         // Look for image alt text inside
         const img = el.querySelector('img');
         if (img && img.alt) return `Img: ${cleanText(img.alt)}`;
+
+        // ContentEditable specific checks
+        if (el.isContentEditable) {
+            // For empty editors, try looking for a placeholder attribute or data-placeholder
+            if (el.getAttribute("placeholder")) return cleanText(el.getAttribute("placeholder"));
+            if (el.getAttribute("data-placeholder")) return cleanText(el.getAttribute("data-placeholder"));
+            // ProseMirror often uses a p tag inside for text
+            if (el.innerText && cleanText(el.innerText).length > 0) return cleanText(el.innerText);
+            return "Rich Text Editor";
+        }
 
         return "Unlabeled Element";
     }
@@ -191,9 +207,42 @@ if (!window.OMNI_AGENT_INITIALIZED) {
                     if (actionObj.value !== null) {
                         highlightInteraction(element);
                         element.focus();
-                        element.value = actionObj.value;
-                        element.dispatchEvent(new Event('input', { bubbles: true }));
-                        element.dispatchEvent(new Event('change', { bubbles: true }));
+
+                        // Check for ContentEditable (Rich Text Editors)
+                        if (element.isContentEditable) {
+                            // Robust method for complex editors (ProseMirror, etc.)
+                            // execCommand 'insertText' simulates user typing much better than DOM manipulation
+                            // It triggers input, beforeinput, and handles the internal model update
+                            element.focus();
+
+                            // Select all text? Or just append?
+                            // Usually "Type X" implies "Type X into the field". 
+                            // If we want to replace, we should select all first. 
+                            // But safest is just to insert. If user wants clear, they usually say "clear".
+                            // Let's try to just insert. 
+
+                            // Note: execCommand is deprecated but it is the ONLY way to reliably interact 
+                            // with contenteditable on the web without specific framework knowledge.
+                            const success = document.execCommand('insertText', false, actionObj.value);
+
+                            if (!success) {
+                                // Fallback if execCommand is blocked/fails
+                                console.warn("execCommand failed, falling back to direct manipulation");
+                                if (element.classList.contains('ProseMirror')) {
+                                    element.textContent = actionObj.value;
+                                } else {
+                                    element.innerText = actionObj.value;
+                                }
+                                element.dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+
+                            element.dispatchEvent(new Event('change', { bubbles: true }));
+                        } else {
+                            // Standard Input/Textarea
+                            element.value = actionObj.value;
+                            element.dispatchEvent(new Event('input', { bubbles: true }));
+                            element.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
 
                         // Wait a tiny bit then hit Enter
                         await new Promise(r => setTimeout(r, 100));
@@ -206,21 +255,6 @@ if (!window.OMNI_AGENT_INITIALIZED) {
                             });
                             element.dispatchEvent(event);
                         });
-
-                        // 2. Try implicit form submission safely
-                        if (element.form) {
-                            // Check if form is still connected to DOM
-                            if (element.form.isConnected && typeof element.form.requestSubmit === 'function') {
-                                try {
-                                    element.form.requestSubmit();
-                                } catch (e) {
-                                    console.warn("Form submission via requestSubmit failed", e);
-                                }
-                            } else {
-                                // Fallback or just ignore if detached
-                                element.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                            }
-                        }
                     }
                     break;
 
