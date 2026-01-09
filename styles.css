@@ -896,60 +896,149 @@ select {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   border: 1px solid #444;
   white-space: nowrap;
-}/* Collapsible Message Styling */
+}
+
+/* Collapsible Message Styling */
 .collapsible-wrapper {
-    position: relative;
-    display: flex;
-    flex-direction: column;
+  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .collapsible-content {
-    overflow: hidden;
-    max-height: 80px;
-    /* Show ~3-4 lines */
-    transition: max-height 0.3s ease-out;
-    position: relative;
+  overflow: hidden;
+  max-height: 80px;
+  /* Show ~3-4 lines */
+  transition: max-height 0.3s ease-out;
+  position: relative;
 }
 
 .collapsible-content.expanded {
-    max-height: none;
+  max-height: none;
 }
 
 /* Fade effect for collapsed state */
 .collapsible-content::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 40px;
-    background: linear-gradient(transparent, var(--bg-color, #1e1e1e));
-    pointer-events: none;
-    opacity: 1;
-    transition: opacity 0.3s;
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 40px;
+  background: linear-gradient(transparent, var(--bg-color, #1e1e1e));
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.3s;
 }
 
 .collapsible-content.expanded::after {
-    opacity: 0;
+  opacity: 0;
 }
 
 .expand-btn {
-    background: none;
-    border: none;
-    color: var(--primary-color, #8ab4f8);
-    font-size: 0.85em;
-    cursor: pointer;
-    padding: 5px 0;
-    align-self: flex-start;
-    margin-top: 5px;
-    font-weight: 500;
+  background: none;
+  border: none;
+  color: var(--primary-color, #8ab4f8);
+  font-size: 0.85em;
+  cursor: pointer;
+  padding: 5px 0;
+  align-self: flex-start;
+  margin-top: 5px;
+  font-weight: 500;
 }
 
 .expand-btn:hover {
-    text-decoration: underline;
+  text-decoration: underline;
 }
 
 /* Specific styling for 'Reading' logs */
 .message.bot .bubble p:first-child {
-    margin-top: 0;
+  margin-top: 0;
+}
+
+/* Screenshot Styling */
+.chat-screenshot {
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  margin-top: 8px;
+  display: block;
+}
+
+.download-link {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 0.8em;
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+.download-link:hover {
+  text-decoration: underline;
+}
+
+/* Plan Approval UI */
+.plan-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 10px;
+}
+
+.plan-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-color);
+}
+
+.plan-content {
+  font-size: 0.9em;
+  white-space: normal;
+  /* Allow markdown HTML to flow */
+  color: #ddd;
+  background: #2b2b2b;
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.plan-content p {
+  margin: 0 0 8px 0;
+}
+
+.plan-content ul,
+.plan-content ol {
+  margin: 0 0 8px 0;
+  padding-left: 20px;
+}
+
+.plan-content li {
+  margin-bottom: 4px;
+}
+
+.plan-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.plan-btn {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.plan-approve {
+  background: #4caf50;
+  color: white;
+}
+
+.plan-reject {
+  background: #f44336;
+  color: white;
 }

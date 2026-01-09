@@ -1,4 +1,9 @@
 // background.js - OmniAgent Service Worker
+try {
+  importScripts('lib/mcp.js');
+} catch (e) {
+  console.error("Failed to import mcp.js", e);
+}
 
 // --- Configuration & State ---
 let currentProvider = 'gemini'; // Default
@@ -15,6 +20,9 @@ let models = {
 };
 let ollamaEndpoint = 'http://localhost:11434/api/generate';
 
+// MCP Manager
+const mcpManager = new self.McpManager();
+
 // Persistent Memory for specific tasks
 let agentMemory = {};
 
@@ -25,11 +33,15 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
 }
 
 // Load settings on startup
-chrome.storage.sync.get(['provider', 'apiKeys', 'models', 'ollamaEndpoint'], (result) => {
+chrome.storage.sync.get(['provider', 'apiKeys', 'models', 'ollamaEndpoint', 'mcpServers'], (result) => {
   if (result.provider) currentProvider = result.provider;
   if (result.apiKeys) apiKeys = result.apiKeys;
   if (result.models) models = result.models;
   if (result.ollamaEndpoint) ollamaEndpoint = result.ollamaEndpoint;
+
+  if (result.mcpServers) {
+    mcpManager.syncServers(result.mcpServers);
+  }
 });
 
 // Listen for updates in settings
@@ -39,6 +51,9 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     if (changes.apiKeys) apiKeys = changes.apiKeys.newValue;
     if (changes.models) models = changes.models.newValue;
     if (changes.ollamaEndpoint) ollamaEndpoint = changes.ollamaEndpoint.newValue;
+    if (changes.mcpServers) {
+      mcpManager.syncServers(changes.mcpServers.newValue || []);
+    }
   }
 });
 
@@ -58,6 +73,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     agentMemory[key].push(value);
     sendResponse({ success: true });
   }
+  // NEW: Handle MCP Tool Execution
+  if (request.type === 'EXECUTE_MCP_TOOL') {
+    const { source, tool, args } = request.payload;
+    mcpManager.callTool(source, tool, args)
+      .then(result => sendResponse({ success: true, result }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
 // --- Main Logic ---
@@ -69,6 +92,17 @@ async function handleUserCommand(payload, sendResponse) {
 
   // Format Memory for context
   const memoryContext = JSON.stringify(agentMemory, null, 2);
+
+  // Get MCP Tools
+  const mcpTools = mcpManager.getAllTools();
+  const mcpToolsContext = mcpTools.length > 0
+    ? "AVAILABLE MCP TOOLS (Use action 'MCP_TOOL'):\n" + JSON.stringify(mcpTools.map(t => ({
+      name: t.name,
+      description: t.description,
+      source: t.source,
+      schema: t.inputSchema
+    })), null, 2)
+    : "No MCP tools connected.";
 
   // Construct the system prompt with visual context
   const systemPrompt = `
@@ -87,6 +121,8 @@ CURRENT COMMAND: "${userPrompt}"
 VISIBLE ELEMENTS (Visual Grounding):
 ${visualContext}
 
+${mcpToolsContext}
+
 GUIDELINES:
 1. **Goal Achievement**: Break down the user's goal into logical steps (Research, Action, Verification).
 2. **Efficiency**: Before clicking into details, check if the necessary information is visible on the current page (e.g., list views). If so, use "SAVE_MEMORY".
@@ -96,12 +132,17 @@ GUIDELINES:
 6. **Patience & Verification**:
    - **WAIT**: If an action (like clicking 'Send' or submitting a form) takes time to process, use the "WAIT" action. Do NOT immediately try again.
    - **Check**: improved: After "TYPE", use "WAIT" or check the next scan to ensure text appeared. If it didn't, try a different selector or move on.
-   - **Reading**: When you find the answer or relevant text on the page, explicitly start a thought or action with "Reading: [text]" to show the user what you found.
+   - **Reading (MANDATORY)**: When you read ANY content from the page to answer the user, you **MUST** start your thought/action with "Reading: [quote]". The user WANTS to see what you read.
+   - **Planning**: If the user asks for a complex task (more than 3 steps) or explicitly asks for a plan, use "CREATE_PLAN" first.
    - **Submitting**: The "TYPE" action attempts to press ENTER. However, on complex sites like AI Studio, this might FAIL. **ALWAYS CHECK** in the next step:
      - IF the text is STILL in the input field -> **CLICK the 'Send/Run' button**.
      - IF the input is cleared -> The message was sent.
-   - **Prevent Loops**: If you just scrolled and the visual context didn't change significantly, STOP scrolling. If you see the start of the answer, assume you can read it.
-   - **Retries**: Don't loop infinitely. If an action fails 3 times, stop and ask the user for help.
+   - **Prevent Loops (CRITICAL)**: 
+     - If you execute an action (e.g., CLICK [ID:1]) and the 'VISIBLE ELEMENTS' in the next turn are EXACTLY THE SAME, **DO NOT CLICK IT AGAIN**. The action likely failed or is a non-interactive label.
+     - Instead, try a DIFFERENT element to re-assess.
+     - **NEVER** click the same element 3 times in a row.
+   - **Retries**: If an action fails or yields no change 2 times, stop and ask the user for help or try a significantly different approach (e.g. searching instead of clicking menu).
+   - **Visual Verification**: Do NOT assume a click worked. Look at the new Visual Context. If the expected new elements (e.g. sub-menu items) are NOT there, consider the click a failure.
 7. **Risk Assessment**:
    - **HIGH**: Buying (Checkout), Deleting data, Posting content, Auth/Login, Configuring Settings.
    - **MEDIUM**: Navigating to new domains, Clicking ads/unknown links.
@@ -118,9 +159,9 @@ Strictly output a JSON object with this schema (no markdown, no code blocks):
 {
   "thought": "Internal reasoning (e.g. 'I see 5 prices in the list, will save them all in one go')",
   "message": "Public message to user (e.g. 'Searching for...', or null)",
-  "action": "CLICK" | "TYPE" | "SCROLL" | "NAVIGATE" | "OPEN_TAB" | "EXTRACT" | "DONE" | "SAVE_MEMORY" | "WAIT",
+  "action": "CLICK" | "TYPE" | "SCROLL" | "NAVIGATE" | "OPEN_TAB" | "EXTRACT" | "DONE" | "SAVE_MEMORY" | "WAIT" | "SCREENSHOT" | "CREATE_PLAN" | "MCP_TOOL",
   "target_id": 12, // (integer) or null
-  "value": "For SAVE_MEMORY: '{\"key\":\"variable_name\", \"value\": [item1, item2, ...]}'. For others: text/url",
+  "value": "For SAVE_MEMORY: '{\"key\":\"variable_name\", \"value\": [item1, item2, ...]}'. For MCP_TOOL: '{\"tool\":\"tool_name\", \"source\":\"server_name\", \"args\":{...}}'. For others: text/url",
   "risk_score": "LOW" | "MEDIUM" | "HIGH",
   "new_title": "Conversation Title (or null if not new)"
 }

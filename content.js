@@ -307,6 +307,20 @@ if (!window.OMNI_AGENT_INITIALIZED) {
                 case "EXTRACT":
                     return { success: true, data: document.body.innerText };
 
+                case "SCREENSHOT":
+                    // Handled in sidepanel.js via chrome API, not content script
+                    // But content script receives the message? 
+                    // Wait, executeAgentAction is in content.js? 
+                    // NO. executeAgentAction is in sidepanel.js calling content.js?
+                    // Let's check.
+                    // Ah, the file view shows executeAgentAction is in content.js?
+                    // NO, I am editing sidepanel.js.
+                    // Wait, lines 183 in content.js has executeAgentAction.
+                    // But sidepanel.js has logic that CALLS it?
+                    // Let's check sidepanel.js loop (lines 770+).
+                    // SCREENSHOT must be handled in SIDEPANEL because content script can't access chrome.tabs.captureVisibleTab easily (needs background permission usually, but sidepanel has it).
+                    return { success: true, action_type: 'SCREENSHOT_NEEDED' };
+
                 default:
                     return { success: false, error: "Unknown action type" };
             }

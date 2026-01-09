@@ -5,6 +5,7 @@ let conversationHistory = [];
 let conversations = {};
 let activeConversationId = null;
 let autonomyMode = 'manual';
+let activePlan = null; // Stores the current approved plan text if any
 let pendingAction = null;
 let pendingTabId = null;
 let isAutonomous = false;
@@ -12,7 +13,8 @@ let activeTabId = null;
 let secrets = {}; // key -> value
 let settingsConfig = {
     apiKeys: {}, // provider -> key
-    models: {}   // provider -> modelName
+    models: {},   // provider -> modelName
+    mcpServers: [] // List of {name, url}
 };
 
 // --- DOM Elements ---
@@ -54,6 +56,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         settingsConfig.models = result.models || {};
         autonomyMode = result.autonomyMode || 'manual'; // CRITICAL FIX
         secrets = result.secrets || {};
+        settingsConfig.mcpServers = result.mcpServers || []; // Load MCPs
 
         // Initialize UI inputs if needed, though they are inside the modal.
         // We trigger the provider update to ensure defaults are set if opened later
@@ -182,6 +185,9 @@ document.getElementById('settings-btn').addEventListener('click', () => {
         const notify = result.notifications || { sound: false, popup: false };
         document.getElementById('notify-sound').checked = notify.sound;
         document.getElementById('notify-popup').checked = notify.popup;
+
+        // Render MCPs
+        renderMcpList();
     });
 });
 
@@ -227,7 +233,8 @@ document.getElementById('save-settings').addEventListener('click', () => {
             ollamaEndpoint: ollamaEnd,
             autonomyMode: autonomy,
             customInstructions: instructions,
-            notifications: notifications
+            notifications: notifications,
+            mcpServers: settingsConfig.mcpServers // Persist MCPs (though they save immediately on add/del, good to be safe)
         };
 
         autonomyMode = autonomy;
@@ -236,6 +243,62 @@ document.getElementById('save-settings').addEventListener('click', () => {
             settingsModal.classList.add('hidden');
         });
     });
+});
+
+// --- MCP UI Logic ---
+function renderMcpList() {
+    const list = document.getElementById('mcp-list');
+    list.innerHTML = '';
+    const servers = settingsConfig.mcpServers || [];
+
+    if (servers.length === 0) {
+        list.innerHTML = '<div style="color:#666; font-size:0.8em; text-align:center; padding:10px;">No servers connected.</div>';
+        return;
+    }
+
+    servers.forEach((server, index) => {
+        const div = document.createElement('div');
+        div.className = 'secret-item'; // Reuse secret-item style for consistency
+        div.innerHTML = `
+            <div style="overflow:hidden;">
+                <span style="font-weight:bold; color:white;">${server.name}</span>
+                <div style="font-size:0.75em; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${server.url}</div>
+            </div>
+            <button class="action-btn delete mcp-del" data-index="${index}">🗑️</button>
+        `;
+        list.appendChild(div);
+    });
+
+    document.querySelectorAll('.mcp-del').forEach(btn => {
+        btn.onclick = (e) => {
+            const idx = parseInt(e.target.dataset.index);
+            if (confirm(`Remove MCP Server?`)) {
+                settingsConfig.mcpServers.splice(idx, 1);
+                chrome.storage.sync.set({ mcpServers: settingsConfig.mcpServers });
+                renderMcpList();
+            }
+        };
+    });
+}
+
+document.getElementById('add-mcp-btn').addEventListener('click', () => {
+    const nameInput = document.getElementById('mcp-name');
+    const urlInput = document.getElementById('mcp-url');
+    const name = nameInput.value.trim();
+    const url = urlInput.value.trim();
+
+    if (!name || !url) {
+        alert("Please enter both Name and URL.");
+        return;
+    }
+
+    if (!settingsConfig.mcpServers) settingsConfig.mcpServers = [];
+    settingsConfig.mcpServers.push({ name, url });
+    chrome.storage.sync.set({ mcpServers: settingsConfig.mcpServers });
+
+    nameInput.value = '';
+    urlInput.value = '';
+    renderMcpList();
 });
 
 // Helper to update inputs based on provider selection
@@ -334,7 +397,7 @@ function loadConversation(id) {
 
     // Replay Messages
     conversationHistory.forEach(msg => {
-        addMessageToUI(msg.role, msg.content);
+        addMessageToUI(msg.role, msg.content, msg.isHtml);
     });
 }
 
@@ -763,11 +826,30 @@ async function runAgentLoop(initialInstruction) {
             // Risk Assessment & Approval
             let shouldBlock = false;
             const risk = action.risk_score || 'HIGH';
-            if (autonomyMode === 'manual') shouldBlock = true;
-            else if (autonomyMode === 'semi' && risk === 'HIGH') shouldBlock = true;
 
-            // Overrides
-            if (action.action === 'SAVE_MEMORY' || action.action === 'DONE' || action.action === 'WAIT') shouldBlock = false;
+            // 1. Strict Mode: Block EVERYTHING
+            if (autonomyMode === 'strict') {
+                shouldBlock = true;
+            }
+            // 2. Manual Mode: Block unless Plan is Active
+            else if (autonomyMode === 'manual') {
+                if (activePlan) {
+                    shouldBlock = false; // Plan authorizes actions
+                } else {
+                    shouldBlock = true;
+                }
+            }
+            // 3. Semi: Block High Risk Only
+            else if (autonomyMode === 'semi' && risk === 'HIGH') {
+                shouldBlock = true;
+            }
+            // 4. Auto: No Block
+
+            // Overrides (Internal / Safe Actions)
+            // CREATE_PLAN has its own UI, so we let it pass to 'execution' phase where the UI is shown
+            if (['SAVE_MEMORY', 'DONE', 'WAIT', 'CREATE_PLAN'].includes(action.action)) {
+                shouldBlock = false;
+            }
 
             if (shouldBlock) {
                 pendingAction = action;
@@ -814,10 +896,74 @@ async function runAgentLoop(initialInstruction) {
                 addMessage('bot', `Waiting request: ${action.value || '5 seconds'}...`);
                 const waitTime = parseInt(action.value) || 5000;
                 await new Promise(r => setTimeout(r, waitTime));
+            } else if (action.action === 'SCREENSHOT') {
+                addMessage('bot', "Taking screenshot...");
+
+                // 1. Cleanup Overlays before visual capture
+                if (activeTabIdForLoop) {
+                    await cleanupOverlays(activeTabIdForLoop);
+                    await new Promise(r => setTimeout(r, 150));
+                }
+                const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+
+                // Create Image Message
+                const imgId = 'shot-' + Date.now();
+                const imgMsg = `
+                    <img src="${dataUrl}" class="chat-screenshot" />
+                    <a href="${dataUrl}" download="screenshot-${Date.now()}.png" class="download-link">Download</a>
+                `;
+                addMessage('bot', imgMsg, true); // HTML content = TRUE
+
+            } else if (action.action === 'MCP_TOOL') {
+                hasPerformedInteraction = true;
+                addMessage('bot', `Executing Tool...`);
+                try {
+                    // Value might be string or object depending on LLM parsing in background
+                    const data = typeof action.value === 'string' ? JSON.parse(action.value) : action.value;
+                    const { tool, source, args } = data;
+
+                    addMessage('bot', `Tool: ${tool} (${source})`);
+
+                    const response = await chrome.runtime.sendMessage({
+                        type: 'EXECUTE_MCP_TOOL',
+                        payload: { source, tool, args }
+                    });
+
+                    if (response.success) {
+                        const output = JSON.stringify(response.result, null, 2);
+                        addMessage('system', `Tool Output: ${output}`);
+                        // Optionally add output to history context for next turn?
+                        // 'addMessage' above adds to history, so LLM will see it.
+                    } else {
+                        addMessage('bot', `Tool Error: ${response.error}`);
+                    }
+                } catch (e) {
+                    addMessage('bot', `Failed to execute tool: ${e.message}`);
+                }
+
+            } else if (action.action === 'CREATE_PLAN') {
+                // Special Flow: Plan Approval
+                addMessage('bot', "Proposing a plan...");
+                const planText = action.value;
+
+                // Custom UI for Plan
+                const decision = await showPlanApproval(planText);
+
+                if (decision === 'APPROVED') {
+                    activePlan = planText;
+                    addMessage('system', "Plan Approved. Autonomy enabled for planned actions.");
+                } else {
+                    activePlan = null;
+                    addMessage('system', "Plan Rejected.");
+                }
+
             } else {
                 hasPerformedInteraction = true;
                 const desc = getActionDescription(action, scanResponse.context);
                 addMessage('bot', desc);
+
+                // Send to Content Script
+                // ... (existing code)
 
                 // SECRET SUBSTITUTION
                 if (action.value && typeof action.value === 'string' && action.value.includes('{{')) {
@@ -936,7 +1082,9 @@ function showApprovalUI(action, risk = 'LOW') {
 
 // --- UI Helpers & Persistence ---
 
-function addMessage(role, text) {
+// --- UI Helpers & Persistence ---
+
+function addMessage(role, text, isHtml = false) {
     // 1. Sync to Memory
     if (!conversations[activeConversationId]) {
         conversations[activeConversationId] = { title: "New Conversation", messages: [] };
@@ -946,36 +1094,40 @@ function addMessage(role, text) {
     const lastMsg = conversationHistory[conversationHistory.length - 1];
     if (lastMsg && lastMsg.role === role && lastMsg.content === text) return;
 
-    conversationHistory.push({ role, content: text });
+    conversationHistory.push({ role, content: text, isHtml });
     saveConversations();
 
     // 2. Sync to UI
-    addMessageToUI(role, text);
+    addMessageToUI(role, text, isHtml);
 }
 
 function addSystemMessage(text) {
-    // System messages are ephemeral usually, or we can save them as 'bot' logs?
-    // For now, let's treat them as ephemeral logs in the UI, not saved in history to save space,
-    // OR save them if they are useful. Let's not save them to avoid clutter.
     addMessageToUI('system', text);
 }
 
-function addMessageToUI(role, text) {
+function addMessageToUI(role, text, isHtml = false) {
     const div = document.createElement('div');
     div.classList.add('message', role);
     const bubble = document.createElement('div');
     bubble.classList.add('bubble');
 
-    // Collapsible Logic: CSS-based Clamping (Fixes markdown/word breaks)
-    let contentHtml = parseMarkdown(text);
+    let contentHtml;
+    // HTML Safety Check: Only allow HTML if flag is true (for screenshots)
+    if (isHtml) {
+        contentHtml = text;
+    } else {
+        // Collapsible Logic: CSS-based Clamping (Fixes markdown/word breaks)
+        contentHtml = parseMarkdown(text);
+    }
 
     // Detect Types
     const isThinking = text.startsWith('Thought:');
     const isAction = text.startsWith('Action:') || text.startsWith('Strategy:') || text.startsWith('Scanning page...');
-    const isReading = text.startsWith('Reading:'); // New Type
+    const isReading = text.startsWith('Reading:');
     const isError = text.startsWith('System Error:');
 
-    const isInternalLog = isThinking || isAction || isReading || isError;
+    // Do not collapse images/HTML
+    const isInternalLog = !isHtml && (isThinking || isAction || isReading || isError);
 
     // Threshold for collapsing
     if (isInternalLog && text.length > 150) {
@@ -1018,22 +1170,24 @@ function addMessageToUI(role, text) {
 
     // Token Usage (Approx 4 chars per token)
     if (role === 'bot' || role === 'user') {
-        const tokens = Math.ceil(text.length / 4);
+        if (!isHtml) {
+            const tokens = Math.ceil(text.length / 4);
 
-        // Update Total
-        if (!window.totalTokenCount) window.totalTokenCount = 0;
-        window.totalTokenCount += tokens;
-        if (document.getElementById('token-footer')) {
-            document.getElementById('token-footer').innerText = `Total Tokens: ${window.totalTokenCount}`;
+            // Update Total
+            if (!window.totalTokenCount) window.totalTokenCount = 0;
+            window.totalTokenCount += tokens;
+            if (document.getElementById('token-footer')) {
+                document.getElementById('token-footer').innerText = `Total Tokens: ${window.totalTokenCount}`;
+            }
+
+            const meta = document.createElement('div');
+            meta.style.fontSize = "0.7em";
+            meta.style.color = "#aaa";
+            meta.style.marginTop = "4px";
+            meta.style.textAlign = "right";
+            meta.innerText = `${tokens} tokens`;
+            bubble.appendChild(meta);
         }
-
-        const meta = document.createElement('div');
-        meta.style.fontSize = "0.7em";
-        meta.style.color = "#aaa";
-        meta.style.marginTop = "4px";
-        meta.style.textAlign = "right";
-        meta.innerText = `${tokens} tokens`;
-        bubble.appendChild(meta);
     }
 
     div.appendChild(bubble);
@@ -1042,6 +1196,39 @@ function addMessageToUI(role, text) {
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
     }
+}
+
+// Plan Approval UI Helper (Global Scope)
+function showPlanApproval(planText) {
+    return new Promise((resolve) => {
+        const div = document.createElement('div');
+        div.className = 'plan-card';
+        div.innerHTML = `
+            <div class="plan-title">Proposed Plan</div>
+            <div class="plan-content">${parseMarkdown(planText)}</div>
+            <div class="plan-actions">
+                <button class="plan-btn plan-approve" id="approve-plan-btn">Approve Plan</button>
+                <button class="plan-btn plan-reject" id="reject-plan-btn">Reject Plan</button>
+            </div>
+        `;
+
+        const container = document.getElementById('chat-container');
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+
+        const approveBtn = div.querySelector('#approve-plan-btn');
+        const rejectBtn = div.querySelector('#reject-plan-btn');
+
+        approveBtn.addEventListener('click', () => {
+            div.remove();
+            resolve('APPROVED');
+        });
+
+        rejectBtn.addEventListener('click', () => {
+            div.remove();
+            resolve('REJECTED');
+        });
+    });
 }
 
 // Reset tokens when loading conversation

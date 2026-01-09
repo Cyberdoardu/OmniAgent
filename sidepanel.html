@@ -121,17 +121,17 @@
                     <div class="setting-group">
                         <label>Autonomy Mode:</label>
                         <div class="radio-group">
-                            <label><input type="radio" name="autonomy" value="manual" checked> Manual (Ask
-                                Everything)</label>
-                            <label><input type="radio" name="autonomy" value="semi"> Intermediate (High Risk
-                                Only)</label>
+                            <label><input type="radio" name="autonomy" value="manual" checked> Manual (Plan
+                                Aware)</label>
+                            <label><input type="radio" name="autonomy" value="strict"> Strict (Always Ask)</label>
+                            <label><input type="radio" name="autonomy" value="semi"> Intermediate</label>
                             <label><input type="radio" name="autonomy" value="auto"> Fully Autonomous</label>
                         </div>
                         <p class="help-text" style="font-size: 0.8em; color: #aaa; margin-top:5px; line-height: 1.4;">
-                            <b>Manual:</b> The agent asks for confirmation before every action.<br>
-                            <b>Intermediate:</b> The agent only asks before high-risk actions (purchases, deleting
-                            data).<br>
-                            <b>Auto:</b> The agent runs autonomously until the task is complete. Use with caution.
+                            <b>Manual:</b> Asks for confirmation, unless a Plan is active.<br>
+                            <b>Strict:</b> ALWAYS asks for confirmation, even with a plan.<br>
+                            <b>Intermediate:</b> Only asks before high-risk actions.<br>
+                            <b>Auto:</b> Runs autonomously until complete.
                         </p>
                     </div>
                 </div>
@@ -160,8 +160,13 @@
                 <div id="tab-mcp" class="tab-pane">
                     <div class="setting-group">
                         <p style="color:#aaa; font-size:0.9em;">Model Context Protocol (MCP) servers allow the agent to
-                            access local tools and data.</p>
-                        <button class="secondary-btn" id="add-mcp-btn">+ Add MCP Server</button>
+                            access local tools and data. (Only SSE supported)</p>
+                        <div style="margin-bottom:10px;">
+                            <input type="text" id="mcp-name" placeholder="Server Name (e.g. Obsidian)"
+                                style="margin-bottom:5px;">
+                            <input type="text" id="mcp-url" placeholder="SSE URL (e.g. http://localhost:3000/sse)">
+                        </div>
+                        <button class="secondary-btn" id="add-mcp-btn" style="width:100%;">+ Add MCP Server</button>
                         <div id="mcp-list" style="margin-top:10px;">
                             <!-- List of MCPs -->
                         </div>
