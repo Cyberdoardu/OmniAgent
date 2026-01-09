@@ -16,6 +16,10 @@
             <button id="close-history" class="icon-btn">×</button>
         </div>
         <button id="new-chat-btn" class="full-width-btn">+ New Chat</button>
+        <div style="padding: 0 16px 10px 16px;">
+            <input type="text" id="history-search" placeholder="Search chats..."
+                style="width:100%; padding:8px; border-radius:6px; border:1px solid #444; background:#2c2c2c; color:white; font-size:0.9em;">
+        </div>
         <div id="conversation-list">
             <!-- Items injected by JS -->
         </div>
@@ -40,8 +44,11 @@
 
     <!-- Input Area -->
     <div class="input-area">
-        <input type="text" id="user-input" placeholder="Type a command... (e.g. 'Open YouTube')">
-        <button id="send-btn">➤</button>
+        <div id="token-footer">Total Tokens: 0</div>
+        <div class="input-controls">
+            <input type="text" id="user-input" placeholder="Type a command... (e.g. 'Open YouTube')">
+            <button id="send-btn">➤</button>
+        </div>
     </div>
 
     <!-- Action Approval Container -->
@@ -181,9 +188,6 @@
     </div>
 
     <script src="markdown.js"></script>
-    <!-- Token Footer -->
-    <div id="token-footer">Total Tokens: 0</div>
-
     <script src="sidepanel.js"></script>
 </body>
 

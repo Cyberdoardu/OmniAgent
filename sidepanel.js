@@ -43,7 +43,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
     // 2. Load Conversations
+    // 2. Load Conversations & Settings
+    // Modified to load everything in one go or separate?
+    // Let's load settings here too to ensure global vars are set before any action.
     const stored = await chrome.storage.local.get(['conversations', 'activeConversationId']);
+
+    // Load Sync Settings (Config)
+    chrome.storage.sync.get(['apiKeys', 'models', 'provider', 'ollamaEndpoint', 'autonomyMode', 'customInstructions', 'secrets'], (result) => {
+        settingsConfig.apiKeys = result.apiKeys || {};
+        settingsConfig.models = result.models || {};
+        autonomyMode = result.autonomyMode || 'manual'; // CRITICAL FIX
+        secrets = result.secrets || {};
+
+        // Initialize UI inputs if needed, though they are inside the modal.
+        // We trigger the provider update to ensure defaults are set if opened later
+        const currentProvider = result.provider || 'gemini';
+        if (document.getElementById('provider-select')) {
+            document.getElementById('provider-select').value = currentProvider;
+            updateInputsForProvider(currentProvider);
+        }
+    });
+
     conversations = stored.conversations || {};
     activeConversationId = stored.activeConversationId || generateId();
 
@@ -67,6 +87,19 @@ document.getElementById('close-history').addEventListener('click', () => {
 document.getElementById('new-chat-btn').addEventListener('click', () => {
     startNewConversation();
     document.getElementById('history-sidebar').classList.add('hidden');
+});
+
+// Search History Listener
+const searchInput = document.getElementById('history-search');
+searchInput.addEventListener('input', () => {
+    renderConversationList();
+});
+searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        searchInput.value = '';
+        renderConversationList();
+        searchInput.blur();
+    }
 });
 
 // Settings
@@ -307,7 +340,11 @@ function loadConversation(id) {
 
 function startNewConversation() {
     const id = generateId();
-    conversations[id] = { title: "New Conversation", messages: [] };
+    conversations[id] = {
+        title: "New Conversation",
+        messages: [],
+        timestamp: Date.now() // Track creation time
+    };
     saveConversations();
     loadConversation(id);
     renderConversationList();
@@ -316,109 +353,201 @@ function startNewConversation() {
 function saveConversations() {
     if (conversations[activeConversationId]) {
         conversations[activeConversationId].messages = conversationHistory;
+        conversations[activeConversationId].timestamp = Date.now(); // Update time on save
     }
     chrome.storage.local.set({ conversations });
     renderConversationList();
 }
 
+// Helper: Get Group Label
+function getGroupLabel(timestamp) {
+    if (!timestamp) return "Antigas";
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffTime = Math.abs(now - date);
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    if (date.toDateString() === now.toDateString()) return "Hoje";
+
+    // Check for Yesterday
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) return "Ontem";
+
+    if (diffDays < 7) return "Essa semana";
+    if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) return "Esse mês";
+
+    // Check Last Month
+    const lastMonth = new Date(now);
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    if (date.getMonth() === lastMonth.getMonth() && date.getFullYear() === lastMonth.getFullYear()) return "Mês passado";
+
+    return "Antigas";
+}
+
 function renderConversationList(editingId = null) {
     const list = document.getElementById('conversation-list');
+    const searchTerm = document.getElementById('history-search')?.value.toLowerCase() || "";
     list.innerHTML = '';
 
-    Object.keys(conversations).reverse().forEach(id => {
-        const item = document.createElement('div');
-        item.className = 'conversation-item';
-        // Styling moved to CSS mostly, but setting active state here
-        if (id === activeConversationId) item.classList.add('active');
+    // 1. Sort & Filter
+    const sortedIds = Object.keys(conversations).sort((a, b) => {
+        const tA = conversations[a].timestamp || 0;
+        const tB = conversations[b].timestamp || 0;
+        return tB - tA; // Newest first
+    });
 
-        // Title Span or Input
-        if (id === editingId) {
-            item.classList.add('editing');
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.value = conversations[id].title || "Untitled";
-            input.className = 'conv-edit-input';
+    // 2. Grouping Buckets
+    const groups = {
+        "Hoje": [],
+        "Ontem": [],
+        "Essa semana": [],
+        "Esse mês": [],
+        "Mês passado": [],
+        "Antigas": []
+    };
 
-            // Save logic
-            const saveTitle = (newTitle) => {
-                conversations[id].title = newTitle.trim() || "Untitled";
-                saveConversations();
-                // Rerender called by saveConversations
-            };
+    let hasMatches = false;
 
-            input.onkeydown = (ev) => {
-                if (ev.key === 'Enter') saveTitle(input.value);
-                ev.stopPropagation();
-            };
-            input.onclick = (e) => e.stopPropagation();
+    sortedIds.forEach(id => {
+        const conv = conversations[id];
+        const title = (conv.title || "").toLowerCase();
+        // naive deep search in messages
+        const contentMatch = conv.messages.some(m => (m.content || "").toLowerCase().includes(searchTerm));
 
-            item.appendChild(input);
-
-            // Auto focus
-            setTimeout(() => input.focus(), 0);
-
-            // Confirm Button
-            const confirmBtn = document.createElement('button');
-            confirmBtn.innerHTML = '✅';
-            confirmBtn.className = 'action-btn confirm';
-            confirmBtn.onclick = (e) => {
-                e.stopPropagation();
-                saveTitle(input.value);
-            };
-            item.appendChild(confirmBtn);
-
-        } else {
-            const titleSpan = document.createElement('span');
-            titleSpan.className = 'conv-title';
-            titleSpan.innerText = conversations[id].title || "Untitled";
-            item.appendChild(titleSpan);
-
-
-            // Buttons Container
-            const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'conv-actions';
-
-            // Rename Button
-            const renameBtn = document.createElement('button');
-            renameBtn.innerHTML = '✏️';
-            renameBtn.className = 'action-btn';
-            renameBtn.title = "Rename";
-            renameBtn.onclick = (e) => {
-                e.stopPropagation();
-                renderConversationList(id); // Set editing mode
-            };
-            actionsDiv.appendChild(renameBtn);
-
-            // Delete Button
-            const deleteBtn = document.createElement('button');
-            deleteBtn.innerHTML = '🗑️';
-            deleteBtn.className = 'action-btn delete';
-            deleteBtn.title = "Delete";
-            deleteBtn.onclick = (e) => {
-                e.stopPropagation();
-                if (confirm("Delete this conversation?")) {
-                    delete conversations[id];
-                    if (activeConversationId === id) {
-                        startNewConversation();
-                    } else {
-                        saveConversations();
-                    }
-                }
-            };
-            actionsDiv.appendChild(deleteBtn);
-            item.appendChild(actionsDiv);
-
-            item.onclick = () => {
-                loadConversation(id);
-                renderConversationList(); // Update active class
-            };
+        if (searchTerm && !title.includes(searchTerm) && !contentMatch) {
+            return; // Skip if no match
         }
 
-
-        list.appendChild(item);
-
-        list.appendChild(item);
+        hasMatches = true;
+        const label = getGroupLabel(conv.timestamp);
+        if (groups[label]) {
+            groups[label].push(id);
+        } else {
+            groups["Antigas"].push(id); // Fallback
+        }
     });
+
+    if (!hasMatches && searchTerm) {
+        list.innerHTML = '<div style="color:#888; padding:10px; text-align:center;">No conversations found.</div>';
+        return;
+    }
+
+    // 3. Render Groups
+    Object.keys(groups).forEach(label => {
+        const groupIds = groups[label];
+        if (groupIds.length === 0) return;
+
+        // Group Header
+        const header = document.createElement('div');
+        header.className = 'history-group-header';
+        header.innerText = label;
+        list.appendChild(header);
+
+        groupIds.forEach(id => {
+            renderConversationItem(id, list, editingId);
+        });
+    });
+}
+// Refactored Item Renderer (moved logic out of loop for clarity)
+function renderConversationItem(id, list, editingId) {
+    const item = document.createElement('div');
+    item.className = 'conversation-item';
+    // Styling moved to CSS mostly, but setting active state here
+    if (id === activeConversationId) item.classList.add('active');
+
+    // Title Span or Input
+    if (id === editingId) {
+        item.classList.add('editing');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = conversations[id].title || "Untitled";
+        input.className = 'conv-edit-input';
+
+        // Save logic
+        const saveTitle = (newTitle) => {
+            conversations[id].title = newTitle.trim() || "Untitled";
+            saveConversations();
+            // Rerender called by saveConversations
+        };
+
+        input.onkeydown = (ev) => {
+            if (ev.key === 'Enter') saveTitle(input.value);
+            ev.stopPropagation();
+        };
+        input.onclick = (e) => e.stopPropagation();
+
+        item.appendChild(input);
+
+        // Auto focus
+        setTimeout(() => input.focus(), 0);
+
+        // Confirm Button
+        const confirmBtn = document.createElement('button');
+        confirmBtn.innerHTML = '✅';
+        confirmBtn.className = 'action-btn confirm';
+        confirmBtn.onclick = (e) => {
+            e.stopPropagation();
+            saveTitle(input.value);
+        };
+        item.appendChild(confirmBtn);
+
+    } else {
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'conv-title';
+        titleSpan.innerText = conversations[id].title || "Untitled";
+        titleSpan.title = conversations[id].title || "Untitled"; // Tooltip
+        item.appendChild(titleSpan);
+
+
+        // Buttons Container
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'conv-actions';
+
+        // Rename Button
+        const renameBtn = document.createElement('button');
+        renameBtn.innerHTML = '✏️';
+        renameBtn.className = 'action-btn';
+        renameBtn.title = "Rename";
+        renameBtn.onclick = (e) => {
+            e.stopPropagation();
+            renderConversationList(id); // Set editing mode
+        };
+        actionsDiv.appendChild(renameBtn);
+
+        // Delete Button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.innerHTML = '🗑️';
+        deleteBtn.className = 'action-btn delete';
+        deleteBtn.title = "Delete";
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (confirm("Delete this conversation?")) {
+                delete conversations[id];
+                // If we deleted the active one, start a new one
+                if (activeConversationId === id) {
+                    startNewConversation();
+                } else {
+                    saveConversations();
+                }
+            }
+        };
+
+        actionsDiv.appendChild(renameBtn);
+        actionsDiv.appendChild(deleteBtn);
+
+        item.appendChild(titleSpan);
+        item.appendChild(actionsDiv);
+
+        // Select Conversation
+        item.onclick = () => {
+            loadConversation(id);
+            document.getElementById('history-sidebar').classList.add('hidden');
+            renderConversationList(); // Re-render to update active state
+        };
+
+        list.appendChild(item);
+    }
 }
 
 // Approval Flow Updates
@@ -837,18 +966,55 @@ function addMessageToUI(role, text) {
     const bubble = document.createElement('div');
     bubble.classList.add('bubble');
 
-    // Collapsible Logic for Long Content
+    // Collapsible Logic: CSS-based Clamping (Fixes markdown/word breaks)
     let contentHtml = parseMarkdown(text);
-    if (text.length > 500 && role !== 'system') {
-        contentHtml = `
-            <details class="collapsible-msg">
-                <summary>Show Content (${text.length} chars)</summary>
-                <div class="collapsible-content">${contentHtml}</div>
-            </details>
-        `;
-    }
 
-    bubble.innerHTML = contentHtml;
+    // Detect Types
+    const isThinking = text.startsWith('Thought:');
+    const isAction = text.startsWith('Action:') || text.startsWith('Strategy:') || text.startsWith('Scanning page...');
+    const isReading = text.startsWith('Reading:'); // New Type
+    const isError = text.startsWith('System Error:');
+
+    const isInternalLog = isThinking || isAction || isReading || isError;
+
+    // Threshold for collapsing
+    if (isInternalLog && text.length > 150) {
+
+        // Wrap in proper structure
+        const wrapper = document.createElement('div');
+        wrapper.className = 'collapsible-wrapper';
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'collapsible-content';
+        contentDiv.innerHTML = contentHtml;
+
+        const btn = document.createElement('button');
+        btn.className = 'expand-btn';
+        btn.innerText = 'Show Content';
+
+        // Toggle Logic
+        btn.onclick = () => {
+            const isExpanded = contentDiv.classList.contains('expanded');
+            if (isExpanded) {
+                contentDiv.classList.remove('expanded');
+                btn.innerText = 'Show Content';
+            } else {
+                contentDiv.classList.add('expanded');
+                btn.innerText = 'Hide Content';
+            }
+        };
+
+        wrapper.appendChild(contentDiv);
+        wrapper.appendChild(btn);
+
+        // Clear bubble and append wrapper
+        bubble.innerHTML = '';
+        bubble.appendChild(wrapper);
+
+    } else {
+        // Short message or regular chat - Show fully
+        bubble.innerHTML = contentHtml;
+    }
 
     // Token Usage (Approx 4 chars per token)
     if (role === 'bot' || role === 'user') {
@@ -857,7 +1023,9 @@ function addMessageToUI(role, text) {
         // Update Total
         if (!window.totalTokenCount) window.totalTokenCount = 0;
         window.totalTokenCount += tokens;
-        document.getElementById('token-footer').innerText = `Total Tokens: ${window.totalTokenCount}`;
+        if (document.getElementById('token-footer')) {
+            document.getElementById('token-footer').innerText = `Total Tokens: ${window.totalTokenCount}`;
+        }
 
         const meta = document.createElement('div');
         meta.style.fontSize = "0.7em";
@@ -879,8 +1047,7 @@ function addMessageToUI(role, text) {
 // Reset tokens when loading conversation
 function resetTokenCount() {
     window.totalTokenCount = 0;
-    document.getElementById('token-footer').innerText = `Total Tokens: 0`;
+    if (document.getElementById('token-footer')) {
+        document.getElementById('token-footer').innerText = `Total Tokens: 0`;
+    }
 }
-
-
-

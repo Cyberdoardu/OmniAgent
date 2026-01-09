@@ -206,55 +206,91 @@ if (!window.OMNI_AGENT_INITIALIZED) {
                 case "TYPE":
                     if (actionObj.value !== null) {
                         highlightInteraction(element);
+                        element.click();
                         element.focus();
 
-                        // Check for ContentEditable (Rich Text Editors)
-                        if (element.isContentEditable) {
-                            // Robust method for complex editors (ProseMirror, etc.)
-                            // execCommand 'insertText' simulates user typing much better than DOM manipulation
-                            // It triggers input, beforeinput, and handles the internal model update
-                            element.focus();
+                        // Delay to ensure focus took hold
+                        await new Promise(r => setTimeout(r, 50));
 
-                            // Select all text? Or just append?
-                            // Usually "Type X" implies "Type X into the field". 
-                            // If we want to replace, we should select all first. 
-                            // But safest is just to insert. If user wants clear, they usually say "clear".
-                            // Let's try to just insert. 
+                        // 1. CLEAR existing content if needed (optional, or we append)
+                        // For now we assume append or overwrite based on context. 
+                        // But mostly user expects "Type X" to put X there.
 
-                            // Note: execCommand is deprecated but it is the ONLY way to reliably interact 
-                            // with contenteditable on the web without specific framework knowledge.
-                            const success = document.execCommand('insertText', false, actionObj.value);
+                        // 2. Dispatch 'beforeinput' (Crucial for generic frameworks)
+                        // Not all browsers support constructing InputEvent with 'data' perfectly in standard, but modern ones do.
+                        try {
+                            const beforeInput = new InputEvent('beforeinput', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                inputType: 'insertText',
+                                data: actionObj.value
+                            });
+                            element.dispatchEvent(beforeInput);
+                        } catch (e) { /* Ignore old browsers */ }
 
-                            if (!success) {
-                                // Fallback if execCommand is blocked/fails
-                                console.warn("execCommand failed, falling back to direct manipulation");
-                                if (element.classList.contains('ProseMirror')) {
-                                    element.textContent = actionObj.value;
+                        // 3. ExecCommand (The Gold Standard for contenteditable)
+                        const success = document.execCommand('insertText', false, actionObj.value);
+
+                        // 4. Fallback: Direct Manipulation + InputEvent
+                        if (!success) {
+                            console.warn("execCommand failed. Using direct manipulation with InputEvent.");
+
+                            if (element.isContentEditable) {
+                                element.textContent = actionObj.value;
+                            } else {
+                                // Input/Textarea - set prototype value to bypass React tracker
+                                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                if (nativeInputValueSetter && (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+                                    nativeInputValueSetter.call(element, actionObj.value);
                                 } else {
-                                    element.innerText = actionObj.value;
+                                    element.value = actionObj.value;
                                 }
-                                element.dispatchEvent(new Event('input', { bubbles: true }));
                             }
-
-                            element.dispatchEvent(new Event('change', { bubbles: true }));
-                        } else {
-                            // Standard Input/Textarea
-                            element.value = actionObj.value;
-                            element.dispatchEvent(new Event('input', { bubbles: true }));
-                            element.dispatchEvent(new Event('change', { bubbles: true }));
                         }
 
-                        // Wait a tiny bit then hit Enter
-                        await new Promise(r => setTimeout(r, 100));
-
-                        // 1. Try dispatching Enter key events
-                        ['keydown', 'keypress', 'keyup'].forEach(type => {
-                            const event = new KeyboardEvent(type, {
-                                bubbles: true, cancelable: true,
-                                key: 'Enter', code: 'Enter', keyCode: 13, which: 13, charCode: 13
+                        // 5. Dispatch 'input' event (The most important one for React/Angular)
+                        // It MUST have the 'data' property for some listener types
+                        try {
+                            const inputEvt = new InputEvent('input', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                inputType: 'insertText',
+                                data: actionObj.value
                             });
-                            element.dispatchEvent(event);
-                        });
+                            element.dispatchEvent(inputEvt);
+                        } catch (e) {
+                            // Fallback for older Event
+                            const evt = new Event('input', { bubbles: true, cancelable: true, view: window });
+                            element.dispatchEvent(evt);
+                        }
+
+                        // 6. TextEvent (Legacy but used by some obscure editors)
+                        try {
+                            if (document.createEvent) {
+                                const textEvent = document.createEvent('TextEvent');
+                                textEvent.initTextEvent('textInput', true, true, window, actionObj.value, 0, "en-US");
+                                element.dispatchEvent(textEvent);
+                            }
+                        } catch (e) { }
+
+                        element.dispatchEvent(new Event('change', { bubbles: true }));
+
+                        // Wait
+                        await new Promise(r => setTimeout(r, 300));
+
+                        // 7. Enter Key check (If we aren't clicking Send manually)
+                        const enterEventOpts = {
+                            key: 'Enter', code: 'Enter', keyCode: 13, which: 13, charCode: 13,
+                            bubbles: true, cancelable: true, view: window
+                        };
+                        element.dispatchEvent(new KeyboardEvent('keydown', enterEventOpts));
+                        element.dispatchEvent(new KeyboardEvent('keypress', enterEventOpts));
+                        element.dispatchEvent(new KeyboardEvent('keyup', enterEventOpts));
+
+                        // Final change to be sure
+                        element.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                     break;
 

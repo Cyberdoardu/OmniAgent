@@ -71,16 +71,14 @@ body {
   position: fixed;
   top: 0;
   left: 0;
-  bottom: 0;
   width: 260px;
+  height: 100%;
   background-color: var(--sidebar-bg);
   border-right: 1px solid var(--border-color);
-  z-index: 2000;
-  padding: 20px;
+  z-index: 200;
   display: flex;
   flex-direction: column;
-  transform: translateX(0);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s ease-in-out;
   box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
 }
 
@@ -90,18 +88,58 @@ body {
 }
 
 .sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 15px;
+  margin-bottom: 10px;
 }
 
 .sidebar-header h3 {
   margin: 0;
-  color: white;
+  font-size: 1.2em;
+  font-weight: 600;
+  color: var(--text-color);
 }
 
 /* --- Conversation List --- */
+#conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px;
+  /* Pretty Scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: #444 transparent;
+}
+
+#conversation-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+#conversation-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#conversation-list::-webkit-scrollbar-thumb {
+  background-color: #444;
+  border-radius: 3px;
+}
+
+.history-group-header {
+  font-size: 0.75em;
+  color: #888;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 15px 0 8px 0;
+  padding-left: 4px;
+}
+
+.history-group-header:first-child {
+  margin-top: 5px;
+}
+
 #new-chat-btn {
   width: 100%;
   padding: 12px;
@@ -419,11 +457,21 @@ body {
 
 /* --- Input Area --- */
 .input-area {
-  padding: 15px;
+  position: relative;
+  padding: 10px 15px 15px 15px;
+  /* Slightly reduced top padding */
   background-color: var(--header-bg);
   border-top: 1px solid var(--border-color);
   display: flex;
+  flex-direction: column;
+  /* Stack Tokens + Controls */
+  z-index: 90;
+}
+
+.input-controls {
+  display: flex;
   gap: 10px;
+  width: 100%;
 }
 
 input[type="text"] {
@@ -829,18 +877,79 @@ select {
 
 /* Token Footer */
 #token-footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  background: rgba(30, 30, 30, 0.95);
-  color: #888;
-  font-size: 0.75em;
+  /* position: static (default) */
+  margin-bottom: 8px;
+  /* Space between tokens and input */
+  align-self: center;
+  /* Center horizontally in the column flex */
+
+  width: auto;
+  background-color: #2c2c2c;
+  color: #e0e0e0;
+  font-size: 0.9em;
   text-align: center;
-  padding: 4px 0;
-  border-top: 1px solid #333;
-  z-index: 100;
+  padding: 4px 12px;
+  border-radius: 16px;
+  z-index: 50;
   pointer-events: none;
-  /* Let clicks pass through if needed, though it's a footer */
   user-select: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  border: 1px solid #444;
+  white-space: nowrap;
+}/* Collapsible Message Styling */
+.collapsible-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.collapsible-content {
+    overflow: hidden;
+    max-height: 80px;
+    /* Show ~3-4 lines */
+    transition: max-height 0.3s ease-out;
+    position: relative;
+}
+
+.collapsible-content.expanded {
+    max-height: none;
+}
+
+/* Fade effect for collapsed state */
+.collapsible-content::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 40px;
+    background: linear-gradient(transparent, var(--bg-color, #1e1e1e));
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 0.3s;
+}
+
+.collapsible-content.expanded::after {
+    opacity: 0;
+}
+
+.expand-btn {
+    background: none;
+    border: none;
+    color: var(--primary-color, #8ab4f8);
+    font-size: 0.85em;
+    cursor: pointer;
+    padding: 5px 0;
+    align-self: flex-start;
+    margin-top: 5px;
+    font-weight: 500;
+}
+
+.expand-btn:hover {
+    text-decoration: underline;
+}
+
+/* Specific styling for 'Reading' logs */
+.message.bot .bubble p:first-child {
+    margin-top: 0;
 }
